@@ -30,14 +30,46 @@ namespace Loops2DPanZoomInput
 				}
 			}
 		}
+		// Only fall back to level viewports; an asset editor's viewport is never the intended target.
 		for (FEditorViewportClient* Candidate : GEditor->GetAllViewportClients())
 		{
-			if (Candidate)
+			if (Candidate && Candidate->IsLevelEditorClient())
 			{
 				return Candidate;
 			}
 		}
 		return nullptr;
+	}
+
+	static FEditorViewportClient* GetHoveredViewportClient(FSlateApplication& SlateApp, const FVector2D& ScreenPos)
+	{
+		if (!GEditor)
+		{
+			return nullptr;
+		}
+		// The hit test only returns visible widgets, so viewports in hidden tabs are skipped.
+		const FWidgetPath Path = SlateApp.LocateWindowUnderMouse(ScreenPos, SlateApp.GetInteractiveTopLevelWindows());
+		for (int32 Index = Path.Widgets.Num() - 1; Index >= 0; --Index)
+		{
+			const SWidget* HitWidget = &Path.Widgets[Index].Widget.Get();
+			for (FEditorViewportClient* Candidate : GEditor->GetAllViewportClients())
+			{
+				const TSharedPtr<SEditorViewport> ViewportWidget = Candidate ? Candidate->GetEditorViewportWidget() : nullptr;
+				if (ViewportWidget.Get() == HitWidget)
+				{
+					return Candidate;
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	// Target the viewport under the cursor so a hotkey doesn't need a click to focus it first.
+	// Falls back to the active viewport when the cursor isn't over one (e.g. over the Curve Editor).
+	static FEditorViewportClient* GetTargetViewportClient(FSlateApplication& SlateApp)
+	{
+		FEditorViewportClient* Hovered = GetHoveredViewportClient(SlateApp, SlateApp.GetCursorPos());
+		return Hovered ? Hovered : GetActiveEditorViewportClient();
 	}
 
 	static bool CanUseShortcuts(FSlateApplication& SlateApp)
@@ -101,7 +133,7 @@ bool FLoops2DPanZoomInputProcessor::HandleKeyDownEvent(FSlateApplication& SlateA
 	{
 		if (bPanZoomKeyDown || InKeyEvent.IsRepeat() || !Loops2DPanZoomInput::CanUseModeShortcuts(SlateApp)) { return false; }
 		ULoops2DPanZoomSubsystem* Subsystem = GEditor->GetEditorSubsystem<ULoops2DPanZoomSubsystem>();
-		FEditorViewportClient* Client = Loops2DPanZoomInput::GetActiveEditorViewportClient();
+		FEditorViewportClient* Client = Loops2DPanZoomInput::GetTargetViewportClient(SlateApp);
 		if (!Subsystem || !Client) { return false; }
 		bPanZoomKeyDown = true;
 		PanZoomHeldKey = Key;
@@ -122,7 +154,7 @@ bool FLoops2DPanZoomInputProcessor::HandleKeyDownEvent(FSlateApplication& SlateA
 		}
 
 		ULoops2DPanZoomSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<ULoops2DPanZoomSubsystem>() : nullptr;
-		FEditorViewportClient* Client = Loops2DPanZoomInput::GetActiveEditorViewportClient();
+		FEditorViewportClient* Client = Loops2DPanZoomInput::GetTargetViewportClient(SlateApp);
 		if (!Subsystem || !Client)
 		{
 			return false;
@@ -154,7 +186,7 @@ bool FLoops2DPanZoomInputProcessor::HandleKeyDownEvent(FSlateApplication& SlateA
 	}
 
 	ULoops2DPanZoomSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<ULoops2DPanZoomSubsystem>() : nullptr;
-	FEditorViewportClient* Client = Loops2DPanZoomInput::GetActiveEditorViewportClient();
+	FEditorViewportClient* Client = Loops2DPanZoomInput::GetTargetViewportClient(SlateApp);
 	if (!Subsystem || !Client || !Subsystem->IsEnabled(Client))
 	{
 		return false;
@@ -211,10 +243,10 @@ bool FLoops2DPanZoomInputProcessor::HandleKeyUpEvent(FSlateApplication& SlateApp
 	bPanZoomKeyDown = false;
 	bPanZoomKeyUsedWithMouse = false;
 
-	// Toggle only if the original viewport is still the active target.
+	// Toggle the viewport targeted on key-down, even if the cursor has since left it, as long as it still exists.
 	ULoops2DPanZoomSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<ULoops2DPanZoomSubsystem>() : nullptr;
-	FEditorViewportClient* Client = Loops2DPanZoomInput::GetActiveEditorViewportClient();
-	if (bWasTap && Subsystem && Client && Client == PanZoomKeyViewportClient)
+	FEditorViewportClient* Client = PanZoomKeyViewportClient;
+	if (bWasTap && Subsystem && Client && GEditor->GetAllViewportClients().Contains(Client))
 	{
 		Subsystem->ToggleEnabled(Client);
 	}
@@ -238,17 +270,15 @@ bool FLoops2DPanZoomInputProcessor::HandleMouseButtonDownEvent(FSlateApplication
 		return false;
 	}
 
+	// Drag the viewport under the pointer; from any other panel (e.g. the Curve Editor),
+	// drag the viewport targeted when the key went down.
 	ULoops2DPanZoomSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<ULoops2DPanZoomSubsystem>() : nullptr;
-	FEditorViewportClient* Client = Loops2DPanZoomInput::GetActiveEditorViewportClient();
-	if (!Subsystem || !Client || Client != PanZoomKeyViewportClient)
+	FEditorViewportClient* Client = Loops2DPanZoomInput::GetHoveredViewportClient(SlateApp, MouseEvent.GetScreenSpacePosition());
+	if (!Client && GEditor && GEditor->GetAllViewportClients().Contains(PanZoomKeyViewportClient))
 	{
-		return false;
+		Client = PanZoomKeyViewportClient;
 	}
-
-	// Preprocessors run before Slate routes the click, so focus alone doesn't
-	// prove the pointer is over the viewport. Leave clicks elsewhere alone.
-	const TSharedPtr<SEditorViewport> ViewportWidget = Client->GetEditorViewportWidget();
-	if (!ViewportWidget || !ViewportWidget->GetCachedGeometry().IsUnderLocation(MouseEvent.GetScreenSpacePosition()))
+	if (!Subsystem || !Client)
 	{
 		return false;
 	}
