@@ -17,4 +17,7 @@ class SLoops2DPanZoomOverlay : public SLeafWidget
 
 	private:
 		FEditorViewportClient* ViewportClient = nullptr;
+		// Where the previous paint placed the widget; see OnPaint.
+		mutable FVector2D LastPaintPosition = FVector2D(-1.0f, -1.0f);
+		mutable FVector2D LastPaintSize = FVector2D::ZeroVector;
 };

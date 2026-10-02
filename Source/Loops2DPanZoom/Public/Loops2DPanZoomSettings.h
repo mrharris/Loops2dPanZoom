@@ -15,4 +15,8 @@ public:
 	// The toolbar and existing numpad shortcuts remain available in all modes.
 	UPROPERTY(Config, EditAnywhere, Category="Shortcuts")
 	bool bAnimationModeOnly = true;
+	// While Pan/Zoom is on, fill a camera's Constrain Aspect Ratio bars with the view beyond the frame.
+	// The frame itself stays where the bars put it; this only matters when zooming makes the extra space useful.
+	UPROPERTY(Config, EditAnywhere, Category="Display")
+	bool bHideCameraLetterbox = true;
 };

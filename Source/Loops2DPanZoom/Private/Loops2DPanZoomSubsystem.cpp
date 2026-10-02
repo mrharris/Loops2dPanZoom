@@ -15,6 +15,7 @@
 #include "Rigs/RigHierarchy.h"
 #include "IControlRigObjectBinding.h"
 #include "EditMode/ControlRigEditMode.h"
+#include "Loops2DPanZoomSettings.h"
 
 /*
  * Perspective pan/zoom is applied through FEditorViewportClient::ViewModifiers
@@ -43,6 +44,45 @@ namespace Loops2DPanZoomLimits
 {
 	constexpr float MinZoom = 0.05f;
 	constexpr float MaxZoom = 20000.0f;
+}
+
+namespace Loops2DPanZoomLetterbox
+{
+	// The locked camera's view info is protected, with no setter. A member pointer formed through a
+	// derived class reaches it without casting the client. UpdateViewForLockedActor rebuilds these from
+	// the camera every tick, so the bars come back on their own once the modifier stops clearing them.
+	struct FAccess : FEditorViewportClient
+	{
+		// ClearedFrame remembers the frame this viewport's constraint was cleared, because a viewport can
+		// draw more than once a frame: the Cinematic Viewport grows once the bars go, and Unreal redraws
+		// it at the new size straight away. That redraw finds the constraint already off but still needs
+		// the axis picked for the new size, or it keeps the one chosen while the viewport matched the
+		// camera's aspect, a rounding coin toss, and draws one frame zoomed in.
+		static void Remove(FEditorViewportClient& Client, uint64& ClearedFrame)
+		{
+			const bool bUsesCameraView = Client.*(&FAccess::bUseControllingActorViewInfo);
+			FMinimalViewInfo& CameraView = Client.*(&FAccess::ControllingActorViewInfo);
+			const bool bClearedThisFrame = ClearedFrame == GFrameCounter;
+			if (!bUsesCameraView || (!CameraView.bConstrainAspectRatio && !bClearedThisFrame)
+				|| CameraView.AspectRatio <= 0.0f || !Client.Viewport)
+			{
+				return;
+			}
+			const FIntPoint Size = Client.Viewport->GetSizeXY();
+			if (Size.X <= 0 || Size.Y <= 0)
+			{
+				return;
+			}
+
+			// Keep the camera frame exactly where the bars framed it: hold the FOV of the axis the frame
+			// fills, so only the bar area changes. Letterbox holds X, pillarbox holds Y.
+			CameraView.bConstrainAspectRatio = false;
+			ClearedFrame = GFrameCounter;
+			const float ViewportAspect = static_cast<float>(Size.X) / static_cast<float>(Size.Y);
+			Client.*(&FAccess::ControllingActorAspectRatioAxisConstraint) =
+				ViewportAspect <= CameraView.AspectRatio ? AspectRatio_MaintainXFOV : AspectRatio_MaintainYFOV;
+		}
+	};
 }
 
 FLoops2DPanZoomState& ULoops2DPanZoomSubsystem::GetState(FEditorViewportClient* ViewportClient)
@@ -98,6 +138,11 @@ void ULoops2DPanZoomSubsystem::ModifyView(FEditorViewportViewModifierParams& Par
 	if (!State->bEnabled && !State->bAnimControlLockEnabled)
 	{
 		return;
+	}
+
+	if (GetDefault<ULoops2DPanZoomSettings>()->bHideCameraLetterbox)
+	{
+		Loops2DPanZoomLetterbox::FAccess::Remove(*ViewportClient, State->LetterboxClearedFrame);
 	}
 
 	if (State->bAnimControlLockEnabled)
@@ -207,6 +252,12 @@ void ULoops2DPanZoomSubsystem::SetEnabled(FEditorViewportClient* ViewportClient,
 		// ApplyToCamera disables it; RestoreCamera restores this saved setting.
 		State.bWasDepthOfFieldEnabled = ViewportClient->EngineShowFlags.DepthOfField;
 		State.ViewModifierHandle = ViewportClient->ViewModifiers.AddUObject(this, &ULoops2DPanZoomSubsystem::ModifyView);
+		// The Cinematic Viewport sizes its widget from the constraint at layout, which can run before the
+		// modifier's next draw. Clear it now so the enable frame isn't laid out with the bars.
+		if (GetDefault<ULoops2DPanZoomSettings>()->bHideCameraLetterbox)
+		{
+			Loops2DPanZoomLetterbox::FAccess::Remove(*ViewportClient, State.LetterboxClearedFrame);
+		}
 
 		RefreshOverlayPresence(ViewportClient, State);
 		ApplyToCamera(ViewportClient, State);

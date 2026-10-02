@@ -45,6 +45,7 @@ struct FLoops2DPanZoomState
 
 	TSharedPtr<SWidget> OverlayWidget;
 	FDelegateHandle ViewModifierHandle;
+	uint64 LetterboxClearedFrame = 0;
 };
 
 // Drives 2D Pan/Zoom per-viewport, keyed by the FEditorViewportClient pointer.

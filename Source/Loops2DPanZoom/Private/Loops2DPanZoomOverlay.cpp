@@ -46,6 +46,19 @@ int32 SLoops2DPanZoomOverlay::OnPaint(const FPaintArgs& Args, const FGeometry& A
 	}
 
 	const FVector2D LocalSize = AllottedGeometry.GetLocalSize();
+
+	// Enabling can resize the viewport (the Cinematic Viewport drops its letterbox), and Slate lays that
+	// out a frame late. Wait until the layout holds still for a frame so the overlay never flashes in
+	// the old position.
+	const FVector2D PaintPosition = AllottedGeometry.GetAbsolutePosition();
+	const bool bLayoutSettled = PaintPosition.Equals(LastPaintPosition) && LocalSize.Equals(LastPaintSize);
+	LastPaintPosition = PaintPosition;
+	LastPaintSize = LocalSize;
+	if (!bLayoutSettled)
+	{
+		const_cast<SLoops2DPanZoomOverlay*>(this)->Invalidate(EInvalidateWidgetReason::Paint);
+		return LayerId;
+	}
 	const float FrameLeft = Loops2DPanZoomOverlayLayout::Margin;
 	const float FrameTop = Loops2DPanZoomOverlayLayout::Margin + Loops2DPanZoomOverlayLayout::TextHeight;
 
