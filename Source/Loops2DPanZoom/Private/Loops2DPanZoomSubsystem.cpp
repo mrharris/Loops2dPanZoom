@@ -261,9 +261,18 @@ void ULoops2DPanZoomSubsystem::SetEnabled(FEditorViewportClient* ViewportClient,
 
 		RefreshOverlayPresence(ViewportClient, State);
 		ApplyToCamera(ViewportClient, State);
+
+		// Resume follow mode if it was active when Pan/Zoom was last turned off.
+		// EnableAnimControlLock's own SetEnabled(true) is a no-op here (already enabled).
+		if (State.bRestoreAnimControlLockOnEnable)
+		{
+			State.bRestoreAnimControlLockOnEnable = false;
+			EnableAnimControlLock(ViewportClient, State);
+		}
 	}
 	else
 	{
+		State.bRestoreAnimControlLockOnEnable = State.bAnimControlLockEnabled;
 		if (State.bAnimControlLockEnabled)
 		{
 			DisableAnimControlLock(ViewportClient, State);

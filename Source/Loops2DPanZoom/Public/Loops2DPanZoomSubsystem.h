@@ -42,6 +42,9 @@ struct FLoops2DPanZoomState
 	bool bAnimControlLockEnabled = false;
 	UPROPERTY()
 	bool bPreToggleAnimControlLockEnabled = false;
+	// Set when Pan/Zoom is disabled while following a control, so re-enabling resumes follow mode.
+	UPROPERTY()
+	bool bRestoreAnimControlLockOnEnable = false;
 
 	TSharedPtr<SWidget> OverlayWidget;
 	FDelegateHandle ViewModifierHandle;
